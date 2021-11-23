@@ -108,6 +108,16 @@ while(ti<=t)
   agent["ConCapital",]<-round(agent["ConCapital",]-(agent["ConCapital",]/md));
   ##depreciation
   
+  if (ti==500)
+  {
+    shockM<-sum(20*(agent["Money",]>20))
+    agent["Money",]<- agent["Money",] - 20*(agent["Money",]>20)
+    shockB<-sample(agent["id", (agent["Employ_ind",]==-1)], 1)
+    agent["Money", shockB]<-agent["Money", shockB]+shockM
+    
+  } 
+  
+  
   ##creates list of agent ids for their turns to act
   a<-matrix(nrow = 1, ncol = n)
   a[1,]<-c(sample(1:n, n, replace = FALSE))
@@ -216,14 +226,14 @@ while(ti<=t)
       ##sample market
       if (agent["Employ_ind",(a[,am])]>0)
       {      
-        ConM<-agent["ConCapital",agent["Employ_ind",(a[,am])]]-mean(agent["ConCapital",])
-        if (ConM<=0)
+        ConM<-agent["ConCapital",agent["Employ_ind",(a[,am])]]/sum(agent["ConCapital",])
+        if (agent["ConCapital",agent["Employ_ind",(a[,am])]]<=0)
         {
           cc1<-0;
         }
         else
         {
-          cc1<-round((ConM/(md))/((agent["N_employees",agent["Employ_ind",(a[,am])]])+1));
+          cc1<-round((ConM*conexT)/((agent["N_employees",agent["Employ_ind",(a[,am])]])+1));
           ##get fixed capital per laborers 
         }
       }
@@ -272,14 +282,14 @@ while(ti<=t)
       ##sample market
       if (agent["ConCapital",(a[,am])]>0)
       {      
-        ConM<-agent["ConCapital",(a[,am])]-mean(agent["ConCapital",])
-        if (ConM<=0)
+        ConM<-agent["ConCapital",(a[,am])]/sum(agent["ConCapital",])
+        if (agent["ConCapital",(a[,am])]<=0)
         {
           cc1<-0;
         }
         else
         {
-          cc1<-round((ConM/(md))/((agent["N_employees",(a[,am])])+1));
+          cc1<-round((ConM*conexT)/((agent["N_employees",(a[,am])])+1));
           ##get fixed capital per laborers 
         }
       }
