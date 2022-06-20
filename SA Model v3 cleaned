@@ -149,8 +149,8 @@ while(ti<=t)
         #adds employer's id to employees Employer index
         agent["wage_level", (a[,am])]<-wsample
         ##set employee wage level
-        agent["wage_exp",a[,am]]<-round(agent["wage_exp",a[,am]]*1.05);
-        ##wage expectation is updated to be equal to new wage level
+        agent["wage_exp",a[,am]]<-round(agent["wage_exp",a[,am]]*1.02);
+        ##wage expectation is increase by 2%
         
         if (agent["Employ_ind", E1]==(0))
         { ##if agent's new employer was formerly unemployed, categorize them as an employer with one employee
@@ -181,11 +181,11 @@ while(ti<=t)
       }
       else
       { 
-        ##if agent isn't hired, decrease wage expecations by 10%
+        ##if agent isn't hired, decrease wage expecations by 40%
         if (agent["Employ_ind", a[,am]]==0)
         {
           
-          agent["wage_exp",a[,am]]<-round(agent["wage_exp",a[,am]]*.35);
+          agent["wage_exp",a[,am]]<-round(agent["wage_exp",a[,am]]*.6);
         }
       }
     }
@@ -405,7 +405,7 @@ m2<-mean(log(FirmbM+1))
 sd2<-sd(log(FirmbM+1))
 ggplot(data = FirmdDF, aes(x=Firm_Deaths))+geom_histogram(aes(y=stat(density)))+stat_function(
   fun = dlnorm,  args = list(mean = m2, sd = sd2), col = "orange")
-(mean(FirmdM))/(mean(colSums(EmployM[1:n,]<0)))
+(mean(FirmdM)*12)/(mean(colSums(EmployM[1:n,]<0)))
 
 
 ##create firm birth histogram
@@ -424,7 +424,7 @@ colnames(rop)<-"RoP"
 minr<-min(rop)
 maxr<-max(r)
 ggplot(data = rop, aes(x=RoP))+geom_histogram(aes(y=stat(density)))+stat_function(
-  fun = dgamma,  args = list(.2, shape=.5), col = "orange")+xlim(0,17)
+  fun = dgamma,  args = list(.15, shape=.4), col = "orange")+xlim(0,17)
 
 #+ scale_y_log10()+ scale_x_log10()
 
@@ -522,7 +522,7 @@ pareto2<-data.frame(pareto1)
 colnames(pareto2)<-"Freq"
 pareto2["Income"]<-sort(unique(round(pareto3)))
 ggplot(data = indf, aes(x=Var1, y=Freq))+geom_point()+xlab("Capitalist Income")+geom_line(data = pareto2, 
-                                                                                          aes(x=Income, y=Freq), col ="orange")+scale_x_log10(limit = c(1000,5000))+scale_y_log10()
+                                                                                          aes(x=Income, y=Freq), col ="orange")+scale_x_log10(limit = c(1000,9000))+scale_y_log10()
 
 
 p1<-ggplot(data = indf, aes(x=Var1, y=Freq))+geom_point()+ scale_y_log10()+ scale_x_log10()+xlab("Worker vs Capitalist Income")
@@ -544,7 +544,7 @@ colnames(dfWorkMon)<-"Worker_income"
 m2<-mean((RevM[EmployM>0]))
 sd2<-sd((RevM[EmployM>0]))
 ggplot(data = dfWorkMon, aes(x=Worker_income))+geom_density()+stat_function(
-  fun = dgamma,  args = list(.03, shape=2.5), col = "orange")+xlim(15,250)
+  fun = dgamma,  args = list(.13, shape=10), col = "orange")+xlim(30,300)
 mean(RevM[EmployM>=0])
 
 ##capitalist income distribution
@@ -604,7 +604,8 @@ aLab<-anEmployeesFin[anVarCap>0]
 aRoP<-(aRev-(aVar+aCon))/(aVar+aCon)
 aCapIn<-aCon/aVar
 aCapIn2<-aCon/aLab
-plot(aCapIn, aRoP)
+plot(aCapIn, aRoP, xlab = "Capital Intensity", ylab = "Rate of Profit", xlim =c(-1, 100), ylim =c(-1, 50))
 #plot(aLab, aCapIn, log = "xy")
 abline(lm(aRoP ~ aCapIn), col = "blue")
 summary(lm(aCapIn ~ aRoP))
+plot(aCapIn, aRoP, xlab = "Capital Intensity log", ylab = "Rate of Profit log", log = "xy")
