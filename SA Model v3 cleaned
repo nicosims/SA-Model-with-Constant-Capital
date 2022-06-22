@@ -221,7 +221,7 @@ while(ti<=t)
 
       s<-conexT;
       
-      if (s>0)
+      if (s>1)
       {
         s1<-sample(1:s, 1);
         #set sale price
@@ -247,9 +247,9 @@ while(ti<=t)
      
       s<-conexT;
       
-      if (s>0)
+      if (s>1)
       {
-        s1<-sample(1:s, 1)+cc1;
+        s1<-sample(1:s, 1);
         #set sale price
         conexT<-conexT-s1;
         agent["Money", (a[,am])]<-agent["Money", (a[,am])]+s1;
@@ -259,20 +259,7 @@ while(ti<=t)
         ##execute sales transaction deposit to employer for consumption good
         
       }
-      else
-      {
-        if (conexT>1)
-        {
-          s1<-sample(1:conexT, 1);
-          #set sale price
-          conexT<-conexT-s1;
-          agent["Money", (a[,am])]<-agent["Money", (a[,am])]+s1;
-          agent["Revenue", (a[,am])]<- agent["Revenue", (a[,am])]+s1;
-          anRev[(a[,am]), ta]<-anRev[(a[,am]), ta]+s1;
-          ##execute sales transaction deposit to employer for consumption good
-          caprev[,ti]<-caprev[,ti]+s1;
-        }
-      }
+
       
       
       ##send out wage payment
