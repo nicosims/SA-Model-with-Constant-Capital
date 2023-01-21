@@ -1,0 +1,313 @@
+library(data.table)
+library(compiler)
+library(microbenchmark)
+
+n<-1000
+##number of agents
+m1 <- 100
+##initial wealth
+t <- 100
+##simulation cycles
+
+cRate<-1.5
+##normal rate of cash growth
+
+cExpRate<-1
+##exponential rate of cash growth
+
+dRate<-1.5
+##normal rate of debt money growth
+
+dExpRate<-1
+##exponential rate of debt money growth
+
+batchRate1<-5
+##how many agents processed per action step
+
+
+d<-10
+##depreciation rate
+
+lsched<-10
+lsched<-lsched*12
+##length of depreciation schedule
+
+
+cdist<-.6
+#Percent of population getting cash distributions
+
+CperWR<-4
+##ratio of capital to worker limit
+
+ConsumptionP<-25
+##average price of consumption goods
+
+CapitalP<-25
+##average price of capital goods
+
+##rate of capitalist saving 1 is no savings, 0 all savings
+srate<-50
+
+mw <- 25
+##average wage
+
+intrate<-.1
+#interest rate
+
+t<-t*12
+
+md<-d*12
+##monthly depreciation rate
+
+##select first time iteration 
+ti<-1
+
+
+agent <- matrix(data=0, nrow = 15, ncol = n)
+rownames(agent)<-c("Employ_ind","id", "industry", "Money","debt_pay", "wage_level","wIncome", "rConsum","investment","depreciation", "ConCapital", "VarCapital", "Revenue","N_employees", "wage_exp")
+##agent has attributes money, employment index for workers, employment index for employers,
+##wage level, and constant capital for agents that are employers, variable capital, revenue, number of employees for capitalists
+##and wage expectations for labor market
+agent["id",]<-1:n
+##id set
+agent["Money",]<-m1
+##initial wealth set
+
+a<-matrix(nrow = 1, ncol = n)
+#agent order list
+
+agent["wage_exp",]<-mw
+##sets original wage expectations for all agents
+
+
+anData <- matrix(data=0, nrow = 12, ncol = n)
+rownames(anData)<-c("Money","debt_pay",  "wage_level","wIncome","rConsum","investment","depreciation", "ConCapital", "VarCapital", "Revenue","N_employees", "wage_exp")
+##annualized agent data
+
+
+##create t - dimmensional array to store all annualized data
+agAnData<- array( dim = c(12, n, (t/12)))
+
+
+##create depreciation schedule
+##use cbind to add new schedules 
+##remove columns in bankruptcy
+depreciation<-matrix(data = 0, nrow = (d*12))
+
+##create depreciation schedule
+##use cbind to add new schedules 
+##remove columns in bankruptcy
+liability<-matrix(data = 0, nrow = (lsched), ncol = n)
+
+FirmbM<-matrix(0, nrow = 1, ncol = t)
+##matrix for firm birth
+FirmdM<-matrix(0, nrow = 1, ncol = t)
+#matrix for firm death
+
+conexT<-0
+##Latent demand pool for consumption expenditures
+
+CexpendM<-matrix(0, nrow=1, ncol = t)
+##matrix for consumption expenditure pool of money
+
+FixexpendM<-matrix(0, nrow = 1, ncol = t)
+##matrix for fixed capital expenditure pool of money 
+
+
+cashfunct1<- function()
+{
+  x<-sum(agent["Money",])
+  b<-((x*cRate)^cExpRate)-x
+  c<-round(n*cdist)
+  d<-sample(agent["id",], c, replace = FALSE)
+  b1<-round(b/c)
+  agent["Money",d]<<-agent["Money",d]+b1
+  
+}
+##distribute cash equally and randomly to specified percent of the population
+
+cashfunct2<- function()
+{
+  x<-sum(agent["Money",])
+  b<-((x*cRate)^cExpRate)-x
+  c<-round(n*cdist)
+  d<-sample(agent["id",], c, replace = FALSE)
+  b1<-round((agent["Money",d]/sum(agent["Money",d]))*b)
+  
+  agent["Money",d]<<-agent["Money",d]+b1
+  
+}
+##distribute cash according to existing distribution of money
+
+liabfunct1<-function()
+{
+  x<-sum(agent["Money",])
+  b<-((x*dRate)^dExpRate)-x
+  c<-round(n*cdist)
+  d<-sample(agent["id",], c, replace = FALSE)
+  b1<-round(b/c)
+  agent["Money",d]<<-agent["Money",d]+b1
+  r = (1 + (intrate/12)) ^ lsched - 1
+  payment =round(b1 * (intrate/12) * (r + 1) / r)
+  liability[1:(lsched),d]<<-(liability[1:(lsched),d])+payment
+}
+##distribute cash equally and randomly to specified percent of the population, but as debt  
+
+liabfunct2<-function()
+{
+  x<-sum(agent["Money",])
+  b<-((x*dRate)^dExpRate)-x
+  c<-round(n*cdist)
+  d<-sample(agent["id",], c, replace = FALSE)
+  b1<-round((agent["Money",d]/sum(agent["Money",d]))*b)
+  agent["Money",d]<<-agent["Money",d]+b1
+  r = (1 + (intrate/12)) ^ lsched - 1
+  payment =round(b1 * (intrate/12) * (r + 1) / r)
+  eM<-matrix(nrow = lsched, ncol = length(d))
+  eM[1,]<-(payment)
+  eM<-eM[rep(1,lsched),]
+  liability[1:(lsched),d]<<-(liability[1:(lsched),d])+eM
+}
+##distribute cash according to existing distribution of money, but as debt
+
+
+##create list of agents for the order of their actions
+agentList<-function()
+{
+  ##creates list of agent ids for their turns to act
+  a[1,]<<-c(sample(1:n, n, replace = FALSE))
+  
+}
+
+##pick potential employers for agents
+pickEmp<-function()
+{
+  eagents<-(agent["Employ_ind",]<= 0) & (agent["id",] != a[,am])&((agent["Money",])>0)&(agent["id",] !=agent["Employ_ind",a[,am]])
+  
+  H<-matrix(nrow = 2, 
+            ncol = length(agent["id", eagents]));
+  H[1,]<-agent["id", eagents];
+  H[2,]<-(agent["Money", eagents])
+  ##creates list of not employed agents, potential employers
+  H[1,]<-H[1,order(H[2,])];
+  H[2,]<-sort(H[2,]);
+  Hprob<-(H[2,]/sum(H[2,]));
+  #creates weighted probabilities by wealth
+  E1<<-c(sample( H[1,], (batchRate+1), prob = Hprob, replace = FALSE));
+  ##selects random employer
+}
+pEmp<-cmpfun(pickEmp)
+
+##labor market function
+jobMarket<-function()
+{
+  wsample<-agent["wage_exp",a[,am:(am+batchRate)]];
+  
+  
+  E1a<-E1[agent["Money",E1]>(wsample*(1+ (CperWR/10) ))]&(wsample>agent["wage_level",a[,am:(am+batchRate)]])
+  Ea<-E1[E1a]
+  Ab<-a[,am:(am+batchRate)]
+  Aa<-Ab[E1a]
+  if (any(E1a)) {
+    ##if offer is greater than or equal to the agent's current wage level, accept job offer AND offer plus
+    ##the capital intensity limit is less than the potential employer's cash reservers employee gets hired
+    
+    EID<-agent["Employ_ind",(a[,Ab])];
+    
+    agent["Employ_ind",(a[,Ab])]<<-E1;
+    #adds employer's id to employees Employer index
+    agent["wage_level", (a[,Ab])]<<-wsample
+    ##set employee wage level
+    agent["wage_exp",a[,Ab]]<<-(agent["wage_exp",a[,Ab]]+ConsumptionP);
+    ##wage expectation is increased by average price of a unit of consumption good
+  Eb<-Ea[agent["Employ_ind", Ea]==(1)]
+  if (length(Eb)>0)
+    {
+    print(Eb)
+      ##if agent's new employer was already a capitalist, add an employee to their firm
+      agent["N_employees", Eb]<<- agent["N_employees", Eb]+1;
+      
+    }
+    
+    Eb<-Ea[agent["Employ_ind", Ea]==(0)]
+    
+    if (length(Eb)>0)
+    { ##if agent's new employer was formerly unemployed, categorize them as an employer with one employee
+      ##AND set their industry
+      FirmbM[,ti]<<- FirmbM[,ti]+1; 
+      agent["Employ_ind", Eb]<<-(-1);
+      agent["N_employees", Eb]<<-1;
+      agent["industry", Eb]<<-sample(1:2,1);
+    }
+    
+    EID<-EID[EID!=0]
+    if(length(EID)>0)
+    {
+      ##if agent was employed and is switching jobs, decrease their old employer's employees by one
+      agent["N_employees",EID]<<-agent["N_employees",EID]-1;
+      
+      
+    }
+    
+    
+    
+    
+  }
+  
+  E1a<-(E1a==FALSE) & (agent["Employ_ind", a[,Aa]]==0)
+  Aa<-Ab[E1a]
+  if (any(E1a))
+  { 
+    ##if agent isn't hired and is currently unemployed, decrease wage expectations by the price of a consumption unit
+    agent["wage_exp",a[,Aa]]<<-round(agent["wage_exp",a[,Aa]]-ConsumptionP);
+    
+  }
+}
+
+jMarket<-cmpfun(jobMarket)
+
+##create consumption function for consumer goods
+
+ConsumFunct<-function()
+{
+  agentNot<-a[,am:(am+batchRate)]
+  conagent<-sample(agent["id",(agent["Money",]>0 & ((agent["id",]%in% agentNot)==FALSE))], (batchRate+1))
+  EmployerL<-conagent[agent["Employ_ind",conagent]<0]
+  OtherL<-conagent[agent["Employ_ind",conagent]>-1]
+  if (length(EmployerL)<0)
+  {
+    EX1<- round( (sample( (1:srate), length(EmployerL))/100)*agent["Money",EmployerL]);
+    conexT<-conexT+sum(EX1);
+    CexpendM[,ti]<-CexpendM[,ti]+EX1;
+    agent["Money",EmployerL]<-agent["Money",EmployerL]-EX1;
+  }
+  else
+  {
+    EX1<- sample(1:agent["Money",conagent], 1);
+    conexT<-conexT+EX1;
+    CexpendM[,ti]<-CexpendM[,ti]+EX1;
+    agent["Money",conagent]<-agent["Money",conagent]-EX1;
+    ##agent expends money for consumption, putting it in total consumption pool
+  }
+  
+}
+
+
+
+##first step, select active agent
+start_time<-Sys.time()
+start_time
+
+am<-1
+agentList()
+
+
+if (am+batchRate>n) {
+  batchRate<-n-am
+} else {
+  batchRate<-batchRate1
+}
+
+pEmp()
+
+jMarket()
