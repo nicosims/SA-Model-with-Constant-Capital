@@ -1,0 +1,1127 @@
+library(data.table)
+library(compiler)
+library(beepr)
+
+n<-1000
+##number of agents
+m1 <- 100
+##initial wealth
+t <- 100
+##simulation cycles
+
+surplusVar<-5
+
+cFcheck1<-FALSE
+cFcheck2<-FALSE
+lFcheck1<-FALSE
+lFcheck2<-TRUE
+
+expShare<-5
+##share of consumption used to adjust expectations
+
+cRate<-0.07
+##normal rate of cash growth
+
+
+batchRate1<-10
+batchRate<-10
+##how many agents processed per action step
+
+mCloseRate<-25
+#how many turns before the market closes and exchange actually occurs
+
+sciTech<-1
+##scientific-technological index value which determines how much production is possible with given techniques
+##use to simulate productivity shocks, positive or negative
+
+d<-10
+##depreciation rate
+
+
+##list of insolvent agents
+insolvent<-matrix(data = 0, ncol = n) 
+
+
+cdist<-.6
+#Percent of population getting cash distributions
+
+CperWR<-10
+##ratio of capital to worker limit
+
+ConsumptionP<-matrix(data = 0, nrow = 2, ncol = 2)
+ConsumptionP[1,1]<-2500
+ConsumptionP[2,1]<-100
+##average price of consumption goods
+ConsumPAn<-matrix(data = 0, ncol = (t*12), nrow = 2)
+
+
+CapitalP<-matrix(data = 0, nrow = 2, ncol = 2)
+CapitalP[1,1]<-2500
+CapitalP[2,1]<-100
+##average price of capital goods
+CapitalPAn<-matrix(data = 0, ncol = (t*12), nrow = 2)
+
+##rate of capitalist consumption/saving 100 is no savings all available for consumption, 
+#0 all savings nothing available for consumption
+crate<-40
+
+mw <- 25
+##starting wage
+
+intrate<-.05
+#interest rate
+
+t<-t*12
+
+md<-d*12
+##monthly depreciation rate
+
+
+##money created
+mcreated<-0
+taxsurplus<-matrix(data = 0, ncol = t)
+
+##select first time iteration 
+ti<-1
+
+##scaling index for money
+mScale<-matrix(data=0,ncol = t)
+cScale<-matrix(data=0,ncol = t)
+
+idealRatio1<-.5
+idealRatio2<-.5
+
+agent <- matrix(data=0, nrow = 18, ncol = n)
+rownames(agent)<-c("Employ_ind","id", "industry", "debt_pay", "Budget", "wage_level","wIncome","nConsum", "rConsum","production","investment","depreciation", "ConCapital", "VarCapital", "Revenue","N_employees", "inc_exp", "Cash")
+##agent has attributes money, employment index for workers, employment index for employers,
+##wage level, and constant capital for agents that are employers, variable capital, revenue, number of employees for capitalists
+##and wage expectations for labor market
+##industry 1 = consumption goods, industry 2 = investment goods
+agent["id",]<-1:n
+##id set
+agent["Budget",]<-mw
+##initial wealth set
+agent["Cash",]<-m1
+
+a<-matrix(nrow = 1, ncol = n)
+#agent order list
+
+agent["inc_exp",]<-mw
+##sets original wage expectations for all agents
+
+
+anData <- matrix(data=0, nrow = 16, ncol = n)
+rownames(anData)<-c("Employ_ind","industry","debt_pay",  "wage_level","wIncome","nConsum", "rConsum","production", "investment","depreciation", "ConCapital", "VarCapital", "Revenue","N_employees", "inc_exp", "Cash")
+##annualized agent data
+anDatarows<-c("Employ_ind","industry","debt_pay",  "wage_level","wIncome","nConsum", "rConsum","production", "investment","depreciation", "ConCapital", "VarCapital", "Revenue","N_employees", "inc_exp", "Cash")
+
+
+##create 3 - dimmensional array to store all annualized data
+agAnData<- array( data=0, dim = c(16, n, (t)))
+rownames(agAnData)<-c("Employ_ind","industry","debt_pay",  "wage_level","wIncome","nConsum", "rConsum","production", "investment","depreciation", "ConCapital", "VarCapital", "Revenue","N_employees", "inc_exp", "Cash")
+
+
+##create depreciation schedule
+##use cbind to add new schedules 
+##remove columns in bankruptcy
+depreciation<-matrix(data = 0, nrow = d, ncol = n)
+agAnCapStock<-matrix(nrow = n, ncol = (t))
+
+##create principal data matrix
+principal<-matrix(data = 0, nrow = 2, ncol = n)
+rownames(principal)<-c("ShortTerm","LongTerm")
+
+FirmbM<-matrix(0, nrow = 1, ncol = t)
+##matrix for firm birth
+FirmdM<-matrix(0, nrow = 1, ncol = t)
+#matrix for firm death
+
+conexT<-0
+##Latent demand pool for consumption expenditures
+
+CexpendM<-matrix(0, nrow=1, ncol = t)
+##matrix for consumption expenditure pool of money
+
+FixexpendM<-matrix(0, nrow = 1, ncol = t)
+##matrix for fixed capital expenditure pool of money 
+
+taxclearing<-function()
+{
+  a<-mcreated
+  b<-sum(agent["Cash",])
+  c<-((a*cRate)-(b-a))/b 
+  agent["Cash",]<<-round(agent["Cash",]*(1+c))
+  agent["Cash",(agent["Cash",]<0)]<<-0
+  taxsurplus[,ti]<<-(sum(agent["Cash",])-a)
+
+}
+
+
+
+##create list of agents for the order of their actions
+agentList<-function()
+{
+  ##creates list of agent ids for their turns to act
+  a[1,]<<-c(sample(1:n, n, replace = FALSE))
+  
+}
+
+budgetf<-function()
+{
+  ##get budgets
+  mcreated<<-sum(agent["Cash",])
+  agent["Budget",]<<-agent["inc_exp",]+agent["Cash",]
+  
+  
+
+}
+
+
+pickEmp<-function()
+{
+  eagents<-(agent["Employ_ind",]<= 0) & !(agent["id",] %in% a[,am:(am+batchRate)])&((agent["Budget",])>0)&!(agent["id",] %in%agent["Employ_ind",a[,am:(am+batchRate)]])
+  
+  H<-matrix(nrow = 2, 
+            ncol = length(agent["id", eagents]));
+  H[1,]<-agent["id", eagents];
+  H[2,]<-(agent["Budget", eagents])
+  ##creates list of not employed agents, potential employers
+  H[1,]<-H[1,order(H[2,])];
+  H[2,]<-sort(H[2,]);
+  Hprob<-(H[2,]/sum(H[2,]));
+  #creates weighted probabilities by wealth
+  #, prob = Hprob
+  E1<<-c(sample( H[1,], (batchRate+1), prob = Hprob, replace = FALSE))
+  #E1<<-E1[order(agent["Budget",E1], decreasing = TRUE )]; 
+  
+  ##selects random employer
+}
+pEmp<-cmpfun(pickEmp)
+
+
+jobMarket<-function()
+{
+  
+  wsample<-agent["inc_exp",a[,am:(am+batchRate)]];
+  #E1<<-E1[order(agent["inc_exp",a[,am:(am+batchRate)]], decreasing = TRUE)] 
+if ((sum(ConsumptionP[2,])/(n*expShare))>0)
+{
+  realD<-(sum(ConsumptionP[2,])/(n*expShare))
+}
+  else
+  {
+    realD<-1
+  }
+  
+  ConsumptionP1<-ceiling( realD*(sum(ConsumptionP[1,] )/sum(ConsumptionP[2,])))
+  
+
+  #*(agent["N_employees",E1]+1)
+  #1+ (CperWR/10)*
+  E1a<-(agent["Budget",E1]>(wsample))&(wsample>agent["wage_level",a[,am:(am+batchRate)]])&(agent["Employ_ind",a[,am:(am+batchRate)]]!=-1)
+  Ea<-E1[E1a]
+  Ab<-a[,am:(am+batchRate)]
+
+  if (any(E1a)) {  
+    
+    Aa<-Ab[E1a]
+    ##if offer is greater than or equal to the agent's current wage level, accept job offer AND offer plus
+    ##the capital intensity limit is less than the potential employer's cash reservers employee gets hired
+    
+    EID<-agent["Employ_ind",(Aa)];
+    
+    agent["Employ_ind",(Aa)]<<-Ea;
+    #adds employer's id to employees Employer index
+    agent["wage_level", (Aa)]<<-wsample[E1a]
+    expUpdate<-sample(1:(5*ConsumptionP1), length(Aa), replace = TRUE)
+    
+    agent["inc_exp",Aa]<<-(agent["inc_exp",Aa]+expUpdate);
+    ##wage expectation is increased by average price of a unit of consumption good
+
+    Eb<-Ea[agent["Employ_ind", Ea]==(-1)];
+    
+    
+        ##set employee wage level
+    
+    #agent["Budget",(Ea)]<<-agent["Budget",(Ea)]-wsample[E1a];
+    ##reducers employer's budget by wage amount
+      
+    if (length(Eb)>0)
+    {
+      
+      ##if agent's new employer was already a capitalist, add an employee to their firm
+      agent["N_employees", Eb]<<- agent["N_employees", Eb]+1;
+   
+    }
+    
+    Eb<-Ea[agent["Employ_ind", Ea]==(0)]
+
+    if (length(Eb)>0)
+    { ##if agent's new employer was formerly unemployed, categorize them as an employer with one employee
+      ##AND set their industry
+      FirmbM[,ti]<<- FirmbM[,ti]+length(Eb); 
+      agent["Employ_ind", Eb]<<-(-1);
+      agent["N_employees", Eb]<<-1;
+   
+      Eb<-Eb[agent["industry", Eb]==0]
+      if (length(Eb)>0)
+      {
+        agent["industry", Eb]<<-sample(1:2,replace = TRUE, length(Eb));
+        
+      }
+      
+    }
+
+    EID<-EID[EID!=0]
+    if(length(EID)>0)
+    {
+      EID1<-apply(matrix(EID), 2, table)
+      EID<-sort(unique(EID))
+      ##if agent was employed and is switching jobs, decrease their old employer's employees by one
+
+      agent["N_employees",EID]<<-agent["N_employees",EID]-EID1;
+
+    }
+    
+    
+    
+    
+  }
+  #& (agent["Employ_ind", a[,am:(am+batchRate)]]==0)
+  E1a<-(E1a==FALSE)& (agent["Employ_ind", a[,am:(am+batchRate)]]==0)
+  Aa<-Ab[E1a]
+  if (any(E1a))
+  { 
+    ##if agent isn't hired and is currently unemployed, decrease wage expectations by the price of a consumption unit
+    expUpdate<-sample(1:(5*ConsumptionP1), length(Aa), replace = TRUE)
+    agent["inc_exp",Aa]<<-round(agent["inc_exp",Aa]-expUpdate);
+    agent["inc_exp",(agent["inc_exp",]<1)]<<-1;
+    if (any(is.na(agent["inc_exp",Aa])))
+    {
+      print("2j")
+      stop()
+    }
+    
+  }
+}
+
+jMarket<-cmpfun(jobMarket)
+
+##create consumption function for consumer goods
+
+ConsumFunct<-function()
+{
+  agentNot<-a[,am:(am+batchRate)]
+  conagent<-sample(agent["id",(agent["Budget",]>0 & ((agent["id",]%in% agentNot)==FALSE))], (batchRate+1))
+  EmployerL<-conagent[agent["Employ_ind",conagent]<0]
+  OtherL<-conagent[agent["Employ_ind",conagent]>-1]
+  if ((sum(ConsumptionP[2,])/(n*expShare))>0)
+  {
+    realD<-(sum(ConsumptionP[2,])/(n*expShare))
+  }
+  else
+  {
+    realD<-1
+  }
+  
+  consump1<-ceiling(realD*(sum(ConsumptionP[1,])/sum(ConsumptionP[2,])))
+  if (length(EmployerL)>0)
+  {
+    EX1<- round( (sample( (1:crate), length(EmployerL))/100)*agent["Budget",EmployerL]);
+
+    CexpendM[,ti]<<-CexpendM[,ti]+sum(EX1);
+    agent["Budget",EmployerL]<<-agent["Budget",EmployerL]-EX1;
+    principal["ShortTerm",EmployerL]<<-principal["ShortTerm",EmployerL]+EX1;
+    agent["nConsum",EmployerL]<<-agent["nConsum",EmployerL]+EX1;
+  }
+  if (length(OtherL)>0)
+  {
+    EX1<- round( (sample( (1:100), length(OtherL))/100)*agent["Budget",OtherL]);
+
+    CexpendM[,ti]<<-CexpendM[,ti]+sum(EX1);
+    agent["Budget",OtherL]<<-agent["Budget",OtherL]-EX1;
+    principal["ShortTerm",OtherL]<<-principal["ShortTerm",OtherL]+EX1;
+    agent["nConsum",OtherL]<<-agent["nConsum",OtherL]+EX1;
+    ##agent expends money for consumption, putting it in total consumption pool
+  }
+  
+  
+}
+ConsFun<-cmpfun(ConsumFunct)
+
+
+
+
+##production of all goods
+prodFunction<-function()
+{
+  agentW<-a[,am:(am+batchRate)]
+  agentW<-agentW[agent["Employ_ind",agentW]!=0]
+  agentWid<-((agent["Employ_ind",agentW]==-1)*agent["id",agentW])+(agent["Employ_ind",agentW]!=-1)*agent["Employ_ind",agentW]
+  agentW<-agentW[agent["N_employees",agentWid]>0]
+  agentWid<-agentWid[agent["N_employees",agentWid]>0]
+  
+  if (length(agentW)>0)
+  {
+    ##human labor can create 1-3 units, with the assumption that laborers can produce, 
+    #without augmentation, only enough surplus to cover 2 other households
+    #constant capital increases the stochastic limit of that surplus directly
+    #distance formula sqrt((x2-x1)^2+(y1-y1)^2)
+    #prodLimit<-round(agent["ConCapital",  agentWid]/agent["N_employees",  agentWid])+surplusVar
+    
+    #get wages for workers and dummy variable for capitalists
+    agentWage<-(agent["wage_level",agentW]*(agent["Employ_ind",agentW]>0))
+
+    ##convert to estimated real consumption
+    agentWage<-agentWage*(sum(ConsumptionP[1,])/sum(ConsumptionP[2,]))
+    agentWage<- agentWage+((agent["Employ_ind",agentW]<0)*(sum(ConsumptionP[2,])/sample(1:n, length(agentW))) )
+ 
+    ##get constant capital per worker
+    agentCon<-round(agent["ConCapital",  agentWid]/(agent["N_employees",  agentWid]+1) )
+    realRatio<-agentCon/(agentCon+agentWage)
+    prodLimit<-(1-abs(idealRatio1-realRatio)*(agent["industry",  agentWid]==1))+(1-abs(idealRatio2-realRatio)*(agent["industry",  agentWid]==2))
+    prodLimit<-round(prodLimit*agentCon)+surplusVar
+
+    #prodLimit<-surplusVar
+    wProd1<-sample(1:100, replace = TRUE, length(agentWid))/100
+    wProd1<-ceiling(prodLimit*wProd1)
+    wProd2<-wProd1*sciTech
+    agent["production", agentWid]<<-agent["production", agentWid]+wProd2
+    
+  } 
+}
+ProdFun<-cmpfun(prodFunction)
+
+marketClean<-function()
+{
+  if (sum(agent["investment",])>0)
+  {
+    agent["Budget",]<-agent["Budget",]+agent["investment",]
+    principal["ShortTerm",]<-principal["ShortTerm",]-agent["investment",]
+    agent["investment",]<-0
+  }
+  if (sum(agent["nConsum",])>0)
+  {
+    agent["Budget",]<-agent["Budget",]+agent["nConsum",]
+    principal["ShortTerm",]<-principal["ShortTerm",]-agent["nConsum",]
+    agent["nConsum",]<-0
+  }
+  agent["production",]<-0
+}
+
+marketClose<-function()
+{
+  if(any(((am:(am+batchRate))/mCloseRate)==round((am:(am+batchRate))/mCloseRate)))
+  { 
+    if(any((((agent["industry",]==1)*1)*agent["production",])>0))
+    {
+      ##employers get their money based off how much they produce out of total and total latent demand
+      c<-((agent["industry",]==1)*1)*agent["production",]
+      a<-(round(sum(agent["nConsum",]) * (c/sum(c))))
+      agent["Cash",]<<-agent["Cash",]+a
+      agent["Revenue",]<<-agent["Revenue",]+a
+      b<-sample(agent["id",agent["production",]>0], 1)
+      
+      
+      agent["Cash",b]<<-agent["Cash",b]-(sum(a)-sum(agent["nConsum",]))
+      agent["Revenue",b]<<-agent["Revenue",b]-(sum(a)-sum(agent["nConsum",]))
+      
+      
+      ##consumers get real goods which they've already spent money on
+      a<-(round(sum(c) * (agent["nConsum",]/sum(agent["nConsum",]))))
+      agent["rConsum",]<<-agent["rConsum",]+a
+      b<-sample(agent["id",agent["nConsum",]>0], 1)
+      agent["rConsum",b]<<-agent["rConsum",b]-(sum(a)-sum(c))
+      
+      ##update average price for consumption goods
+      ConsumptionP[1,2]<<-ConsumptionP[1,2]+sum(agent["nConsum",])
+      ConsumptionP[2,2]<<-ConsumptionP[2,2]+sum(c)
+      ##move nconsm and production data to historical data before deleting from current agent array
+      anData["production",]<<-anData["production",]+c
+      anData["nConsum",]<<-anData["nConsum",]+agent["nConsum",]
+      agent["nConsum",]<<-0
+      agent["production",(agent["industry",]==1)]<<-0
+    }
+    if (any(agent["investment",]>0)&any((((agent["industry",]==2)*1)*agent["production",])>0))
+    {
+      
+      ##employers get their money based off how much they produce out of total and total latent demand
+      c<-((agent["industry",]==2)*1)*agent["production",]
+      a<-(round(sum(agent["investment",]) * (c/sum(c))))
+      agent["Cash",]<<-agent["Cash",]+a
+      agent["Revenue",]<<-agent["Revenue",]+a
+      b<-sample(agent["id",agent["production",]>0], 1)
+      agent["Cash",b]<<-agent["Cash",b]-(sum(a)-sum(agent["investment",]))
+      agent["Revenue",b]<<-agent["Revenue",b]-(sum(a)-sum(agent["investment",]))
+      
+      
+      ##consumers get real goods which they've already spent money on
+      a<-(round(sum(c) * (agent["investment",]/sum(agent["investment",]))))
+      d1<-agent["id",a>0]
+      trip<-FALSE
+      if((length(d1)>1)&(sum(a)-sum(c))!=0)
+      {
+        
+        for (bTick in 1:abs(-(sum(a)-sum(c)) ))
+        {
+          if(sum(agent["id",a>0 ])!=1)
+          {
+          b<-sample(agent["id",a>0 ], 1)
+          if (-(sum(a)-sum(c))<0)
+          {
+            a[b]<-a[b]-1
+          }
+          else
+          {
+            a[b]<-a[b]+1
+          }
+          }
+          else
+          {
+            if (trip==FALSE)
+            {
+            a[b]<-a[b]+(-(sum(a)-sum(c))/abs(-(sum(a)-sum(c)) ))*(abs(-(sum(a)-sum(c)) )-bTick)
+            trip<-TRUE
+            }
+            }
+            
+
+          }
+
+        
+        if(any(a[b]<0))
+        {
+          print(a[b])
+
+          stop()
+        }
+      }
+      
+      agent["ConCapital",]<<-agent["ConCapital",]+a
+      
+      
+      
+      ##set depreciation schedules
+      
+      #depreciation1<-colSums(depreciation)
+      dep1<-(floor(a/d))
+      dep1<-is.finite(dep1)*dep1
+
+      dep1<-matrix(data = dep1, nrow = d, ncol = n, byrow = TRUE)
+      depreciation<<-depreciation+dep1
+      
+      dep1<-(a-colSums(dep1))
+      depTemp<-agent["id",dep1>0]
+      dep1<-dep1[dep1>0]
+      depTick<-1
+      for (depR in dep1)
+      {
+
+          depreciation[1:depR,depTemp[depTick]]<<-depreciation[1:depR,depTemp[depTick]]+1
+          
+
+        depTick<-depTick+1
+      }
+
+      
+      ##update average price for consumption goods
+      CapitalP[1,2]<<-CapitalP[1,2]+sum(agent["investment",])
+      CapitalP[2,2]<<-CapitalP[2,2]+sum(c)
+      
+      ##move nconsum and production data to historical data before deleting from current agent array
+      anData["production",]<<-anData["production",]+c
+      anData["investment",]<<-anData["investment",]+agent["investment",]
+      agent["investment",]<<-0
+      agent["production",(agent["industry",]==2)]<<-0
+    }
+    
+    
+  }
+}
+mCloseFun<-cmpfun(marketClose)
+#reset industries for defunct firms at end of year AND archive annual data
+fReset<-function()
+{   
+  aRest<-(agent["industry",]>0)&(agent["Employ_ind",]!=(-1))
+  agent["industry",aRest]<<-0
+  agAnData[,,ti]<<-anData
+  anData<<-anData*0
+  
+}
+anDataFun<-function()
+{
+  
+  anData<<-anData+agent[anDatarows,] 
+  agent[c("debt_pay", "wIncome", "nConsum", "rConsum", "production", "investment", "depreciation", "VarCapital", "Revenue"),]<<-0
+  ConsumPAn[1 , ti]<<-sum(ConsumptionP[1,])
+  ConsumPAn[2 , ti]<<-sum(ConsumptionP[2,])
+  agAnCapStock[,ti]<<-colSums(depreciation)
+  ConsumptionP[,1]<<-ConsumptionP[,2]
+  ConsumptionP[,2]<<-0
+  CapitalPAn[1 , ti]<<-sum(CapitalP[1,])
+  CapitalPAn[2 , ti]<<-sum(CapitalP[2,])
+  CapitalP[,1]<<-CapitalP[,2]
+  CapitalP[,2]<<-0
+}
+
+depreciationFun<-function()
+{
+  ##move depreciation into agent accounts, decrease constant capital by depreciation levels
+
+  agent["ConCapital",]<<-agent["ConCapital",]-depreciation[1,]
+  agent["depreciation",]<<-depreciation[1,]
+  depreciation[1:(nrow(depreciation)-1),]<<-depreciation[2:(nrow(depreciation)),]
+  depreciation[(nrow(depreciation)),]<<-0
+}
+
+debtPayFun<-function()
+{ 
+  
+  
+
+  ##pay short term debt
+  debtPayS<-agent["Cash",]-principal["ShortTerm",]
+  principal["ShortTerm",]<<-(-debtPayS*(debtPayS<=0))
+  #print(principal["ShortTerm",])
+  agent["Cash",]<<-debtPayS*(debtPayS>=0)
+  
+  ##pay long term debt
+  debtPayL<-agent["Cash",]-round(principal["LongTerm",]/md)
+  principal["LongTerm",]<<-(principal["LongTerm",]-round(principal["LongTerm",]/md)-(debtPayL*(debtPayL<=0)))
+  agent["Cash",]<<-debtPayL*(debtPayL>=0)
+  
+  ##transfer unpaid short term debt to long term debt
+  principal["LongTerm",]<<-principal["LongTerm",]+principal["ShortTerm",]
+  
+  ##check for insolvency
+  insolvent<-(principal["LongTerm",]*intrate)>agent["inc_exp",]
+
+}
+debtPFun<-cmpfun(debtPayFun)
+
+payroll<-function()
+{
+  ##check for employer agents
+  agentE<-a[,am:(am+batchRate)]
+  agentE<-agentE[agent["Employ_ind",agentE]==-1]
+  if(length(agentE)>0)
+  {
+    
+    for (e in agentE)
+    {
+      
+      ##create list of employees
+      vcRatio<-sample(1:CperWR, 1)/10
+      Wa<-matrix(nrow = 3, ncol = length(agent["id",agent["Employ_ind",]==(e)]));
+      Wa[1,]<-agent["id",agent["Employ_ind",]==(e)];
+      Wa[2,]<-agent["wage_level",agent["Employ_ind",]==(e)];
+      ##make sure workers are only getting paid once this production cycle
+      Wa[2,(agent["wIncome",Wa[1,]]>0)]<-0
+      Wa[3,]<-round(Wa[2,]*(1+vcRatio))
+      ##randomize list, withhold wages for certain percent of workforce
+      Wran<-sample(1:round(length(Wa[1,])), round(length(Wa[1,])), replace = FALSE);
+      W<-matrix(nrow = 3, ncol = length(Wran))
+      W[1,]<-Wa[1, Wran];
+      W[2,]<-Wa[2, Wran];
+      W[3,]<-Wa[3, Wran];
+      #pay employees
+      paid<-(cumsum(W[3,])<agent["Budget",(e)]);
+      agent["Budget",(e)] <<- agent["Budget",(e)]-sum(W[3,paid]);
+      principal["ShortTerm",e]<<-principal["ShortTerm",e]+-sum(W[3,paid]);
+      agent["Cash", W[1,paid]]<<-agent["Cash", W[1,paid]]+W[2,paid];
+      agent["wIncome",W[1,paid]]<<-agent["wIncome",W[1,paid]]+W[2,paid];
+      agent["VarCapital",e]<<-agent["VarCapital",e]+sum(W[2,paid]);
+      
+      
+      ##mark down investment made
+      invAm<-sum(round(W[2,paid]*vcRatio))
+      agent["investment",e]<<-agent["investment",e]+invAm;
+
+      
+      
+      
+      
+      
+      ##those workers who can't be paid are laid off
+      paid<-paid==FALSE;
+      agent["Employ_ind",W[1,paid]]<<-0;
+      agent["wage_level",W[1,paid]]<<-0;
+      agent["N_employees",e]<<-agent["N_employees",e]-sum(paid);
+
+      
+      ##check for firm failure
+      if (agent["N_employees",e]==0)
+      {
+        agent["Employ_ind", e]<<-0;
+        ##transfer constant capital stock to production account for sale
+        agent["production", e]<<-agent["production", e]+agent["ConCapital",e];
+        anData["ConCapital",e]<<-anData["ConCapital",e]+agent["ConCapital",e]
+        agent["ConCapital",e]<<-0;
+        agent["inc_exp",e]<<-ceiling(agent["inc_exp",e]*(crate/100));
+        #agent["inc_exp",(agent["inc_exp",]<1)]<<-1;
+        depreciation[,e]<<-0;
+        FirmdM[,ti]<<-FirmdM[,ti]+1;
+        ##employer becomes unemployed, capital accounts are zeroed out
+      }
+    }
+  }
+}
+payrollFun<-cmpfun(payroll)
+##accrue interest, only occurs after all agents have gone
+intaddFun<-function()
+{
+  principal["LongTerm",]<<-round(principal["LongTerm",]*(1+(intrate/12)))
+}
+
+##quitting function for when employees have enough money to consider starting thier own business
+quitFun<-function()
+{
+  if ((sum(ConsumptionP[2,])/(n*expShare))>0)
+  {
+    realD<-(sum(ConsumptionP[2,])/(n*expShare))
+  }
+  else
+  {
+    realD<-1
+  }
+  ConsumptionP1<-ceiling( realD*(sum(ConsumptionP[1,] )/sum(ConsumptionP[2,])))
+  agentQ<-a[,am:(am+batchRate)]
+  Qtf<-agent["Budget",agentQ]>agent["wage_level",agentQ]+ConsumptionP1*2
+  Qtf<-(Qtf*(sample(1:2, length(Qtf), replace = TRUE)-1))==1
+  agentQ<-agentQ[Qtf]
+  if (length(agentQ)>0)
+  {
+    for (agQ in agentQ)
+    {
+    agent["inc_exp",agentQ]<-agent["inc_exp",agentQ]+ConsumptionP1
+    }
+  }
+
+}
+idealFun<-function()
+{
+  idealRatio1<-sample(1:100,1)/100
+  idealRatio2<-sample(1:100,1)/100
+  }
+
+##function for scaling, run at end of year, after annual data is stored 
+scalingFun<-function()
+{
+  mScale1<-floor((sum(agent["Budget",])/(n*m1))/10)
+  if (mScale1>0)
+  {
+    agent["Budget",]<<-round(agent["Budget",]/(mScale1*10))
+    agent["inc_exp",]<<-round(agent["inc_exp",]/(mScale1*10))
+    agent["Cash",]<<-round(agent["Cash",]/(mScale1*10))
+    agent["wage_level",]<<-round(agent["wage_level",]/(mScale1*10))
+    CapitalP[1,]<<-round(CapitalP[1,]/(mScale1*10))
+    ConsumptionP[1,]<<-round(ConsumptionP[1,]/(mScale1*10))
+    principal<<-round(principal/(mScale1*10))
+    mScale[,ti]<<-mScale[,ti]+mScale1
+  }
+  cScale1<-floor((sum(agent["ConCapital",])/(n*m1))/10)
+  if (cScale1>0)
+  {
+    agent["ConCapital",]<<-round(agent["ConCapital",]/(cScale1*10))
+    CapitalP[2,]<<-round(CapitalP[2,]/(cScale1*10))
+    ConsumptionP[2,]<<-round(ConsumptionP[2,]/(cScale1*10))
+    depreciation<<-round(depreciation/(cScale1*10))
+    cScale[,ti]<<-cScale[,ti]+cScale1
+    
+  }
+}
+scalFun<-cmpfun(scalingFun)
+
+agentSetpFun<-function()
+{
+  while (am<=n)
+  {
+    
+    if (am+batchRate>n) {
+      batchRate<<-n-am
+    } else {
+      batchRate<<-batchRate1
+    }
+    pEmp()
+    jMarket()
+    ConsFun()
+    ProdFun()
+    payrollFun()
+    mCloseFun()
+    am<<-am+1+batchRate
+    
+  }
+}
+aStepFun<-cmpfun(agentSetpFun)
+
+
+
+simFun1<-function()
+{
+  while (ti<=(t))
+  {
+    am<<-1
+    agentList()
+    budgetf()
+    aStepFun()
+    marketClean()
+    debtPFun()
+    intaddFun()
+    depreciationFun()
+    anDataFun()
+    fReset()
+    idealFun()
+    taxclearing()
+    scalFun()
+    ti<<-ti+1
+  }
+}
+simFun<-cmpfun(simFun1)
+
+
+##these functions for debugging
+simFun2<-function()
+{
+  while (ti<=(t))
+  {
+    am<<-1
+    agentList()
+    budgetf()
+    aStepFun()
+    if( any(is.na(agent)))
+    {
+      stop("7")
+    }
+    marketClean()
+    if( any(is.na(agent)))
+    {
+      stop("8")
+    }
+    debtPFun()
+    if( any(is.na(agent)))
+    {
+      stop("9")
+    }
+    intaddFun()
+    if( any(is.na(agent)))
+    {
+      stop("10")
+    }
+    depreciationFun()
+    if( any(is.na(agent)))
+    {
+      stop("11")
+    }
+    anDataFun()
+    if( any(is.na(agent)))
+    {
+      stop("12")
+    }
+    fReset()
+    if( any(is.na(agent)))
+    {
+      stop("13")
+    }
+    idealFun()
+    taxclearing()
+    scalFun()
+    if( any(is.na(agent)))
+    {
+      stop("14")
+    }
+    ti<<-ti+1
+  }
+}
+simFun2<-cmpfun(simFun2)
+
+agentSetpFun2<-function()
+{
+  while (am<=n)
+  {
+    
+    if (am+batchRate>n) {
+      batchRate<<-n-am
+    } else {
+      batchRate<<-batchRate1
+    }
+    pEmp()
+    if( any(is.na(agent)))
+    {
+      stop("1")
+    }
+    jMarket()
+    if( any(is.na(agent)))
+    {
+      stop("2")
+    }
+    ConsFun()
+    if( any(is.na(agent)))
+    {
+      stop("3")
+    }
+    ProdFun()
+    if( any(is.na(agent)))
+    {
+      stop("4")
+    }
+    payrollFun()
+    if( any(is.na(agent)))
+    {
+      stop("5")
+    }
+    mCloseFun()
+    if( any(is.na(agent)))
+    {
+      stop("6")
+    }
+    am<<-am+1+batchRate
+    
+  }
+}
+aStepFun2<-cmpfun(agentSetpFun2)
+
+start_time<-Sys.time()
+simFun()
+stop_time<-Sys.time()
+stop_time-start_time
+beep()
+
+
+employedPop<-colSums(agAnData["Employ_ind",,]>0)/n
+employedPop1<-colSums(agAnData["N_employees",,])/n
+
+plot(20:t,employedPop[20:t], type = "l", ylab = "Employed Population", xlab = "Time")
+
+capPop1<-colSums(agAnData["Employ_ind",,]==-1)/n
+unemployedPop<-1-(capPop1+employedPop)
+unemployedPop<-round((unemployedPop*100), digits = 2)
+plot(unemployedPop, type = "l", ylab = "Unemployed Population", xlab = "Time")
+plot(capPop1, type = "l", ylab = "Capitalist Population", xlab = "Time")
+#altCapPop<-cumsum(FirmbM)-cumsum(FirmdM)
+
+
+mScaler<-cumsum(mScale)
+mScaler<-c(0, mScaler[1:(length(mScaler)-1)])
+mScaler<-(10^mScaler)
+
+cScaler<-cumsum(cScale)
+cScaler<-c(0, cScaler[1:(length(cScaler)-1)])
+cScaler<-(10^cScaler)
+
+cappScaler<-(CapitalPAn[1,]*mScaler)/(CapitalPAn[2,]*cScaler)
+conpScaler<-(ConsumptionP[1,]*mScaler)/(ConsumptionP[2,]*cScaler)
+  
+depPlot<-colSums(agAnData["depreciation",,])
+depPlot<-depPlot*cScaler*cappScaler
+
+#lines(1:t, (mScale*50), col = "blue", type = "p")
+varCapPlot<-colSums(agAnData["VarCapital",,])*mScaler
+RevPlot<-colSums(agAnData["Revenue",,])*mScaler
+investPlot<-colSums(agAnData["investment",,])*mScaler
+investShare<-(investPlot/(RevPlot))
+plot(investShare, type = "l", ylab = "Investment as Share of GDP")
+mean(investShare)
+#lines(varCapPlot+investPlot)
+#lines(RevPlot, col = "blue")
+ProfitPlot<-(RevPlot-(varCapPlot+depPlot))/(varCapPlot+depPlot)
+plot(5:length(ProfitPlot), ProfitPlot[5:length(ProfitPlot)] , type = "l", ylab = "Economy Level Profit Rate", xlab = "Time: Starting at 5th timestep")
+plot(depPlot/RevPlot, type = "l", ylab = "Depreciation as Share of Revenue")
+
+
+CapIntype2<-depPlot/varCapPlot
+plot(CapIntype2, type ="l", ylab = "Capital Intensity", xlab = "Time")
+
+
+workInc<-colSums(agAnData["wIncome",,])*mScaler
+capInc<-colSums(agAnData["Revenue",,])*mScaler
+workShare<-(workInc/(capInc))
+plot(workShare, type = "l", ylab = "Working Class Share of Income")
+
+hist(workShare[10:n], main = "Histogram of Working Class Income Share", xlab = "")
+
+depPlot1<-colSums(agAnData["depreciation",,]*(agAnData["industry",,]==1))
+depPlot1<-depPlot1*cappScaler*cScaler
+
+depPlot2<-colSums(agAnData["depreciation",,]*(agAnData["industry",,]==2))
+depPlot2<-depPlot2*cappScaler*cScaler
+
+VarCapPlot1<-colSums(agAnData["VarCapital",,]*(agAnData["industry",,]==1))*mScaler
+
+VarCapPlot2<-colSums(agAnData["VarCapital",,]*(agAnData["industry",,]==2))*mScaler
+
+Revplot1<-colSums(agAnData["Revenue",,]*(agAnData["industry",,]==1))*mScaler
+
+Revplot2<-colSums(agAnData["Revenue",,]*(agAnData["industry",,]==2))*mScaler
+
+Debtplot1<-colSums(agAnData["debt_pay",,]*(agAnData["industry",,]==1))*mScaler
+Debtplot2<-colSums(agAnData["debt_pay",,]*(agAnData["industry",,]==2))*mScaler
+
+CStock1<-colSums(agAnCapStock*(agAnData["industry",,]==1))
+CStock1<-CStock1*cappScaler*cScaler
+
+CStock2<-colSums(agAnCapStock*(agAnData["industry",,]==2))
+CStock2<-CStock2*cappScaler*cScaler
+
+
+ConCapplot1<-colSums(agAnData["ConCapital",,]*(agAnData["industry",,]==1))
+ConCapplot1<-ConCapplot1*cappScaler*cScaler
+
+ConCapplot2<-colSums(agAnData["ConCapital",,]*(agAnData["industry",,]==2))
+ConCapplot2<-ConCapplot2*cappScaler*cScaler
+
+
+Indudstry1Profit<-(Revplot1-(depPlot1+VarCapPlot1))/(depPlot1+VarCapPlot1)
+Indudstry2Profit<-(Revplot2-(depPlot2+VarCapPlot2))/(depPlot1+VarCapPlot2)
+
+plot(Indudstry1Profit[5:t], type = "l", main = "Industry Profit Rates", ylim = c(0,1), xlab = "Time", ylab = "Profit Rate")
+lines(Indudstry2Profit[5:t], col = "red")
+legend("topright", legend = c("Consumption Good Industry", "Means of Production Industry"), col = c("black", "red"), pch = 1)
+
+Industry1CapIn<-CStock1/VarCapPlot1
+Industry2CapIn<-CStock2/VarCapPlot2
+
+ProfitRel<-c(Indudstry1Profit[5:t],Indudstry2Profit[5:t])
+CapInRel<-c(Industry1CapIn[5:t], Industry2CapIn[5:t])
+
+plot(Indudstry1Profit[5:t],Industry1CapIn[5:t] , col = "red", ylab = "Industry Capital Intensity", xlab = "Industry Profit", xlim = c(0,1))
+lines(Indudstry2Profit[5:t], Industry2CapIn[5:t], col = "blue", type = "p")
+abline(lm( Industry1CapIn[5:t] ~ Indudstry1Profit[5:t]), col = "red")
+abline(lm( Industry2CapIn[5:t] ~ Indudstry2Profit[5:t]), col = "blue")
+legend("topright", legend = c("Consumption Good Industry", "Means of Production Industry"), col = c("red", "blue"), pch = 1)
+
+plot(c(Indudstry1Profit[5:t], Indudstry2Profit[5:t]),c(Industry1CapIn[5:t], Industry2CapIn[5:t]) , ylab = "Industry Capital Intensity", xlab = "Industry Profit", ylim = c(min(CapInRel), max(CapInRel)), xlim = c(min(ProfitRel), max(ProfitRel)))
+abline(lm( c(Industry1CapIn[5:t], Industry2CapIn[5:t]) ~ c(Indudstry1Profit[5:t], Indudstry2Profit[5:t])), col = "red")
+summary(lm( c(Industry1CapIn[5:t], Industry2CapIn[5:t]) ~ c(Indudstry1Profit[5:t], Indudstry2Profit[5:t])))
+
+#CapAnMatrix<-matrix(CapitalPAn[1,]/CapitalPAn[2,], nrow = n, ncol = t, byrow = TRUE)
+min(agAnData["depreciation",,5:t])
+CStockC<-(agAnCapStock[5:t])*cappScaler[5:t]*cScaler[5:t]
+depCon<-agAnData["depreciation",,5:t]*cappScaler[5:t]*cScaler[5:t]
+capCon<-agAnData["ConCapital",,5:t]*cappScaler[5:t]*cScaler[5:t]
+proRateDis<-(agAnData["Revenue",,5:t]*mScaler[5:t]-(agAnData["VarCapital",,5:t]*mScaler[5:t]+depCon))/(agAnData["VarCapital",,5:t]*mScaler[5:t]+CStockC)
+capIn<-CStockC/(agAnData["VarCapital",,5:t]*mScaler[5:t])
+capIn<-capIn[!is.nan(proRateDis)]
+proRateDis<-proRateDis[!is.nan(proRateDis)]
+capIn<-capIn[!is.infinite(proRateDis)]
+proRateDis<-proRateDis[!is.infinite(proRateDis)]
+proRateDis<-proRateDis[!is.nan(capIn)]
+capIn<-capIn[!is.nan(capIn)]
+proRateDis<-proRateDis[!is.infinite(capIn)]
+capIn<-capIn[!is.infinite(capIn)]
+
+
+hist(proRateDis, freq = TRUE, breaks = 10000, xlim = c(-1, 5), xlab = "Profit Rate", main = "Histogram of Profit Rates")
+#plot((capIn), (proRateDis), xlim = c(0, 100), ylim = c(-1, 100))
+#abline(lm( proRateDis ~ capIn), col = "blue")
+
+
+##income distribution graphs
+##select which year to inspect income distribution
+yr<-1000
+depIncome<-agAnData["depreciation",,yr]*cappScaler[yr]*cScaler[yr]
+depIncome<-round(depIncome/mScaler[yr])
+RevIncome<-(agAnData["Revenue",,yr]-agAnData["VarCapital",,yr])
+pincome<-RevIncome-depIncome
+sum(pincome)
+
+totalinc<-pincome+agAnData["wIncome",,yr]
+totalinc<-totalinc[totalinc>0]
+pincome<-pincome[pincome>0]
+winc<-agAnData["wIncome",,1000]
+winc<-winc[winc>0]
+
+cashtotal<-agAnData["Cash",,1000]
+cashtotal<-cashtotal[cashtotal>0]
+
+pdIncome<-function(x)
+{
+  freqt<-as.matrix(table((x)))
+  numlist<-matrix(1:length(x))
+  freqt1<-sort(unique(c(x,1:max(x))))
+  freqt1<-cbind(freqt1,0)
+  freqt1[(freqt1[,1]%in%x), 2]<-freqt
+  freqt1[,2]<-(sum(freqt1[,2])-cumsum(freqt1[,2]))/sum(freqt1[,2])
+  freqt1
+}
+
+totalincPD<-pdIncome(totalinc)
+
+plot(totalincPD, log = "xy", main = "Total Income Distribution", xlim = c(100, max(totalincPD)))
+
+wincPD<-pdIncome(winc)
+
+plot(wincPD, log = "xy", main = "Worker Income Distribution")
+
+capincPD<-pdIncome(pincome[pincome>0])
+
+plot(capincPD, log = "xy", main = "Capitalist Income Distribution")
+
+
+plot(capincPD, log = "xy", main = "Capitalist vs Worker Income Distribution", ylab = "Probability", xlab = "Income")
+lines(wincPD, col = "blue")
+legend("bottomleft", legend = c("Capitalist", "Worker"), col = c("black", "blue"), pch = 1)
+
+cashPD<-pdIncome(cashtotal)
+plot(cashPD, log = "xy", main = "Cash Distribution", xlim = c(100, max((cashPD))))
+
+
+hist((pincome+winc),breaks = 1000, main = "Histogram of Agent Income Levels", xlab = "Worker Income + Profit")
+
+capIn<-capIn[order(proRateDis)]
+proRateDis<-proRateDis[order(proRateDis)] 
+
+dfPC<-data.frame(proRateDis[order(capIn)], capIn[order(capIn)])
+divSize<-100
+
+divCount<-rep(1:divSize, ceiling(length(dfPC$capIn)/divSize))
+divCount<-sort(divCount)
+dfPC$divCount<-divCount[1:length(dfPC$capIn)]
+mPC<-matrix(nrow = (length(dfPC$capIn)-divSize), ncol = 2)
+runAvgFun<-function()
+{
+  mPC1<-matrix(nrow = (length(dfPC$capIn)-divSize), ncol = 2)
+for (dC in (1:(length(dfPC$capIn)-divSize) ) ) 
+{
+  mPC1[dC, 1]<-mean(dfPC$proRateDis.order.capIn..[1:(dC+divSize)])
+  mPC1[dC, 2]<-mean(dfPC$capIn.order.capIn..[1:(dC+divSize)])
+}
+  mPC[,1]<<-mPC1[,1]
+  mPC[,2]<<-mPC1[,2]
+}
+rnAvF<-cmpfun(runAvgFun)
+
+
+
+pricesI1<-(colSums(agAnData["Revenue",,]*(agAnData["industry",,]==1))/colSums(agAnData["production",,]*(agAnData["industry",,]==1)))
+employeesI1<-colSums(agAnData["N_employees",,]*(agAnData["industry",,]==1))/colSums(agAnData["production",,]*(agAnData["industry",,]==1)) 
+
+
+pricesI2<-(colSums(agAnData["Revenue",,]*(agAnData["industry",,]==2))/colSums(agAnData["production",,]*(agAnData["industry",,]==2)))
+employeesI2<-colSums(agAnData["N_employees",,]*(agAnData["industry",,]==2))/colSums(agAnData["production",,]*(agAnData["industry",,]==2)) 
+#industry prices per good vs industry number of employeees per good
+plot(pricesI1, employeesI1, col = "red", ylab = "Employees per Good", xlab = "Unit Prices")
+lines(pricesI2,employeesI2, type = "p", col ="blue" )
+legend("topright", legend = c("Consumption Good Industry", "Means of Production Industry"), col = c("red", "blue"), pch = 1)
+
+##plot level of cash in the economy
+plot(colSums(agAnData["Cash",,])*mScaler, log = "y", main = "Level of Cash in the Economy", ylab = "Cash", xlab = "Time")
+
+##plot level of output in the economy
+plot(colSums(agAnData["production",,])*cScaler, log = "y", main = "Level of Economic Output", ylab = "Output", xlab = "Time")
+
+
+#Profit Equations check:
+##nominal consumption + nominal investment should equal total revenue (capInc)  
+##statistical discrepancy caused by rounding when dividing money to produces 
+#according to their output brought to market
+nConsumPlot<-colSums(agAnData["nConsum",,])*mScaler
+plot((((nConsumPlot+investPlot)-capInc)/capInc), main = "Statistical Discrepencay", ylab = "")
+#lines((cScale[1,]!=0))
+all(workInc==varCapPlot)
+
+##STOP BEFORE RUNNING THIS
+##takes a while to run, necessary to plot average capital intensity versus profit rate
+rnAvF()
+
+#plot( mPC[, 2],  mPC[, 1], type = "l", col = "blue", xlab = "Capital Intensity", ylab = "Profit Rates")
+plot( mPC[mPC[, 2]>0, 2],  mPC[mPC[, 2]>0, 1], type = "l", col = "blue", xlab = "Capital Intensity", ylab = "Profit Rates")
