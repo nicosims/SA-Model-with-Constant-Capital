@@ -246,7 +246,7 @@ prodFunction<-function()
     #prodLimit<-round(agent["ConCapital",  agentWid]/agent["N_employees",  agentWid])+surplusVar
     
     #get wages for workers and dummy variable for capitalists
-    agentWage<-(agent["wage_level",agentW]*(agent["Employ_ind",agentW]>0))
+    agentWage<-(agent["wage_level",agentW]/(agent["Employ_ind",agentW]>0))
     
     ##convert to estimated real consumption
     agentWage<-agentWage*(sum(ConsumptionP[1,])/sum(ConsumptionP[2,]))
