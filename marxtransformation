@@ -1,0 +1,195 @@
+library(data.table)
+library(compiler)
+library(shiny)
+
+
+percentChangeF<-function(x1){
+  x2<-x1[2:length(x1)]
+  x1<-x1[1:(length(x1)-1)]
+  x3<-round( ((x2-x1)/x1), digits = 2)
+  x3
+}
+
+
+updateProgress <- function(x1) {
+  progress$set(value = x1, detail = "")}
+
+pdIncome<-function(x)
+{
+  freqt<-as.matrix(table((x)))
+  numlist<-matrix(1:length(x))
+  freqt1<-sort(unique(c(x,1:max(x))))
+  freqt1<-cbind(freqt1,0)
+  freqt1[(freqt1[,1]%in%x), 2]<-freqt
+  freqt1[,2]<-(sum(freqt1[,2])-cumsum(freqt1[,2]))/sum(freqt1[,2])
+  freqt1
+}
+
+
+n<-1000
+##number of agents
+m1 <- 100
+##initial wealth
+timsim <- 100
+##simulation cycles
+
+##list of main adjustable variables
+
+##initial unemployment
+intialUn<-4
+
+initialInv<-10
+
+intialIncome<-100*n
+
+surplusVar<<-5
+
+cRate<<-4/12
+##normal rate of cash growth
+
+intrate<<-10
+#interest rate
+
+d<<-10
+##depreciation rate
+
+##rate of capitalist consumption/saving 100 is no savings all available for consumption, 
+#0 all savings nothing available for consumption
+crate<<-.5*100
+
+mw <<- 25
+##starting wage expctation
+
+timsim<<-timsim*12
+##conver time to months
+
+md<<-d*12
+##monthly depreciation rate
+
+surplusVar<<-5
+
+#expShare<<-10
+##share of consumption used to adjust expectations
+
+batchRate1<<-ceiling(n/100)
+batchRate<<-ceiling(n/100)
+##how many agents processed per action step
+
+mCloseRate<<-ceiling(n*.025)
+#how many turns before the market closes and exchange actually occurs
+
+sciTech<<-1
+##scientific-technological index value which determines how much production is possible with given techniques
+##use to simulate productivity shocks, positive or negative
+
+#cdist<<-.6
+#Percent of population getting cash distributions
+
+
+##list of insolvent agents
+insolvent<<-matrix(data = 0, ncol = n) 
+
+ConsumptionP<<-matrix(data = 0, nrow = 2, ncol = 2)
+ConsumptionP[1,1]<<-2500
+ConsumptionP[2,1]<<-100
+##average price of consumption goods
+ConsumPAn<<-matrix(data = 0, ncol = (timsim), nrow = 2)
+
+
+CapitalP<<-matrix(data = 0, nrow = 2, ncol = 2)
+CapitalP[1,1]<<-2500
+CapitalP[2,1]<<-100
+##average price of capital goods
+CapitalPAn<<-matrix(data = 0, ncol = (timsim), nrow = 2)
+
+##money created
+mcreated<<-0
+taxsurplus<<-matrix(data = 0, ncol = timsim)
+
+
+##scaling index for money
+mScale<<-matrix(data=0,ncol = timsim)
+cScale<<-matrix(data=0,ncol = timsim)
+
+agent <- matrix(data=0, nrow = 20, ncol = n)
+rownames(agent)<-c("Employ_ind","id", "industry", "industry_type", "fixed_cap_type", "debt_pay", "Budget", 
+                   "wage_level","wIncome","nConsum", "rConsum","production","investment","depreciation", 
+                   "ConCapital", "VarCapital", "Revenue","N_employees", "inc_exp", "Cash")
+##agent has attributes money, employment index for workers, employment index for employers,
+##wage level, and constant capital for agents that are employers, variable capital, revenue, number of employees for capitalists
+##and wage expectations for labor market
+##industry arbitrary N index
+##industry type refers to producing consumer goods, 
+#producing homogeneous fixed capital goods, producing heterogeneous fixed capital goods
+#fixed capital type refers to what fixed capital the industry uses in production
+agent["id",]<-1:n
+##id set
+agent["Budget",]<<-mw
+##initial wealth set
+agent["Cash",]<<-m1
+
+aglist<<-matrix(nrow = 1, ncol = n)
+#agent order list
+
+agent["inc_exp",]<<-mw
+##sets original wage expectations for all agents
+
+
+##create 3 - dimmensional array to store all annualized data
+agAnData<<- array( data=0, dim = c(18, n, (timsim)))
+rownames(agAnData)<<-c("Employ_ind","id", "industry", "industry_type", "fixed_cap_type", "debt_pay", "Budget", "wage_level","wIncome","nConsum", "rConsum","production","investment","depreciation", "ConCapital", "VarCapital", "Revenue","N_employees", "inc_exp", "Cash")
+
+
+##create depreciation schedule
+depreciation<<-matrix(data = 0, nrow = d, ncol = n)
+
+ti<<-1
+
+
+#this function creates the initial randomized values for
+#employment
+#fixed capital
+#debt
+#
+randomFillFun<-function(length1,volume1, prob1)
+{
+  ##creates a vector of random values (length is length1) via a uniform distribution that sums to a specific amount (volume1)
+  outputrFill<-sample(1:length1, volume1, replace = TRUE)
+  tabulate(outputrFill)
+}
+randomFillFun1<-cmpfun(randomFillFun)
+
+initializeFun<-function(intUn, inInc, inInv){
+
+  ##create local copy of list of agents
+  Aglist1<-agent["id",]
+  ##make 10% of population capitalist
+  caplist1<-sample(Aglist1, (n*.1), replace = FALSE)
+  Aglist1<-Aglist1[!(Aglist1%in%caplist1)]
+  ##make rest of population workers depending on pre-specified unemployment level
+  workerlist1<-sample(Aglist1, (length(Aglist1)*(1-(intUn/100))), replace = FALSE)
+  
+  ##create employer probability weights
+  ##for now let's just do a probability by rank
+  empProb<- 1:length(caplist1)
+  
+  ##attach employers to each worker
+  employerind1<-sample(caplist1, length(workerlist1), replace = TRUE, prob = empProb)
+
+  ##output the initial employ index list
+  initialclassout<-matrix(data = 0, ncol = length(agent["id",]))
+  initialclassout[,workerlist1]<-employerind1
+  initialclassout[,caplist1]<-(-1)
+  initialclassout
+}
+
+
+tabulate(initializeFun(intialUn,intialIncome, initialInv))
+test1<-randomFillFun1(10, 150, NULL)
+
+library(microbenchmark)
+
+  ##create initial fixed capital and depreciation schedules
+  ##get initial investment amount
+  intInv1<-inInc*(inInv/100)
+  
